@@ -49,7 +49,6 @@ async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Эта команда работает только в группах.")
         return
 
-    # Проверка прав администратора
     try:
         member = await chat.get_member(user.id)
         if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
@@ -62,7 +61,6 @@ async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user_id = None
     target_username = None
 
-    # Если есть реплай на сообщение пользователя
     if update.message.reply_to_message:
         target_user_id = update.message.reply_to_message.from_user.id
         target_username = update.message.reply_to_message.from_user.username
@@ -116,7 +114,6 @@ async def removeping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Не удалось проверить ваши права.")
         return
 
-    # Аналогично определяем пользователя
     target_user_id = None
     if update.message.reply_to_message:
         target_user_id = update.message.reply_to_message.from_user.id
