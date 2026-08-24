@@ -1,7 +1,7 @@
 import logging
 from telegram import Update, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE, SECTION_NAMES
+from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE, SECTION_NAMES, ALLOWED_USERS
 from database import (
     add_ping_user, remove_ping_user, get_ping_users,
     get_all_topics, get_all_open_topics, mark_reminder_sent,
@@ -12,6 +12,11 @@ from utils import send_notification, is_topic_closed_on_page
 logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 5
+
+# ---------- Вспомогательная функция проверки доступа в ЛС ----------
+def is_private_chat_allowed(user_id: int) -> bool:
+    """Проверяет, разрешён ли пользователь для работы в ЛС."""
+    return user_id in ALLOWED_USERS
 
 # ---------- Пагинация /showdb ----------
 async def send_showdb_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
@@ -55,33 +60,17 @@ async def send_showdb_page(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     else:
         await update.message.reply_html(text, reply_markup=reply_markup)
 
-async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/showdb от {update.effective_user.id}")
-    try:
-        rows = get_all_topics()
-        if not rows:
-            await update.message.reply_html("📭 База данных пуста.")
-            return
-        context.user_data['showdb_rows'] = rows
-        await send_showdb_page(update, context, 0)
-    except Exception as e:
-        logger.error(f"Ошибка в /showdb: {e}", exc_info=True)
-        await update.message.reply_html(f"❌ Ошибка: {e}")
-
-async def showdb_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data
-    if data == "showdb_close":
-        await query.edit_message_text("❌ Закрыто.")
-        await query.answer()
-        return
-    if data.startswith("showdb_page_"):
-        page = int(data.split("_")[2])
-        await send_showdb_page(update, context, page)
-
-# ---------- Основные команды ----------
+# ---------- Команды ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/start от {update.effective_user.id}")
+    user_id = update.effective_user.id
+    chat_type = update.effective_chat.type
+    logger.info(f"/start от {user_id} в {chat_type}")
+
+    # Если это ЛС – проверяем доступ
+    if chat_type == "private" and not is_private_chat_allowed(user_id):
+        await update.message.reply_html("⛔ У вас нет доступа к боту в личных сообщениях.")
+        return
+
     await update.message.reply_html(
         "👋 Я бот для отслеживания новых тем на форуме VimeWorld.\n\n"
         "<b>Команды для администраторов:</b>\n"
@@ -95,17 +84,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     chat = update.effective_chat
-    user = update.effective_user
-    topic_id = update.effective_message.message_thread_id
-    logger.info(f"/setgroup от {user.id} в {chat.id}, тема {topic_id}")
+    chat_type = chat.type
+    logger.info(f"/setgroup от {user_id} в {chat_type}")
 
-    if chat.type not in ["group", "supergroup"]:
+    # В ЛС – проверяем доступ
+    if chat_type == "private":
+        if not is_private_chat_allowed(user_id):
+            await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
+            return
+        # В ЛС команда не имеет смысла, но можно разрешить админам
+        await update.message.reply_html("⚠️ Эта команда работает только в группах.")
+        return
+
+    # В группе – проверяем админа
+    if chat_type not in ["group", "supergroup"]:
         await update.message.reply_html("⚠️ Только в группах.")
         return
 
+    topic_id = update.effective_message.message_thread_id
     try:
-        member = await chat.get_member(user.id)
+        member = await chat.get_member(user_id)
         if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
             await update.message.reply_html("⛔ Только администраторы.")
             return
@@ -133,16 +133,24 @@ async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     chat = update.effective_chat
-    user = update.effective_user
-    logger.info(f"/addping от {user.id}")
+    chat_type = chat.type
+    logger.info(f"/addping от {user_id} в {chat_type}")
 
-    if chat.type not in ["group", "supergroup"]:
+    if chat_type == "private":
+        if not is_private_chat_allowed(user_id):
+            await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
+            return
+        await update.message.reply_html("⚠️ Эта команда работает только в группах.")
+        return
+
+    if chat_type not in ["group", "supergroup"]:
         await update.message.reply_html("⚠️ Только в группах.")
         return
 
     try:
-        member = await chat.get_member(user.id)
+        member = await chat.get_member(user_id)
         if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
             await update.message.reply_html("⛔ Только администраторы.")
             return
@@ -185,20 +193,28 @@ async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_html("Не удалось определить пользователя.")
         return
 
-    add_ping_user(chat.id, target_user_id, target_username, added_by=user.id)
+    add_ping_user(chat.id, target_user_id, target_username, added_by=user_id)
     await update.message.reply_html(f"✅ Пользователь {target_username or target_user_id} добавлен.")
 
 async def removeping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     chat = update.effective_chat
-    user = update.effective_user
-    logger.info(f"/removeping от {user.id}")
+    chat_type = chat.type
+    logger.info(f"/removeping от {user_id} в {chat_type}")
 
-    if chat.type not in ["group", "supergroup"]:
+    if chat_type == "private":
+        if not is_private_chat_allowed(user_id):
+            await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
+            return
+        await update.message.reply_html("⚠️ Эта команда работает только в группах.")
+        return
+
+    if chat_type not in ["group", "supergroup"]:
         await update.message.reply_html("⚠️ Только в группах.")
         return
 
     try:
-        member = await chat.get_member(user.id)
+        member = await chat.get_member(user_id)
         if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
             await update.message.reply_html("⛔ Только администраторы.")
             return
@@ -236,10 +252,19 @@ async def removeping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html("✅ Пользователь удалён.")
 
 async def listpings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     chat = update.effective_chat
-    logger.info(f"/listpings от {update.effective_user.id}")
+    chat_type = chat.type
+    logger.info(f"/listpings от {user_id} в {chat_type}")
 
-    if chat.type not in ["group", "supergroup"]:
+    if chat_type == "private":
+        if not is_private_chat_allowed(user_id):
+            await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
+            return
+        await update.message.reply_html("⚠️ Эта команда работает только в группах.")
+        return
+
+    if chat_type not in ["group", "supergroup"]:
         await update.message.reply_html("⚠️ Только в группах.")
         return
 
@@ -255,13 +280,40 @@ async def listpings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html(text)
 
 async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/test от {update.effective_user.id}")
+    user_id = update.effective_user.id
+    chat_type = update.effective_chat.type
+    logger.info(f"/test от {user_id} в {chat_type}")
+
+    if chat_type == "private" and not is_private_chat_allowed(user_id):
+        await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
+        return
+
     await update.message.reply_html("🔄 Отправляю тестовое сообщение...")
     await send_notification("🧪 <b>Тестовое сообщение</b> от бота. Если вы его видите – всё работает!")
     await update.message.reply_html("✅ Тестовое сообщение отправлено.")
 
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/forceremind от {update.effective_user.id}")
+    user_id = update.effective_user.id
+    chat = update.effective_chat
+    chat_type = chat.type
+    logger.info(f"/forceremind от {user_id} в {chat_type}")
+
+    if chat_type == "private":
+        if not is_private_chat_allowed(user_id):
+            await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
+            return
+        # В ЛС разрешаем выполнять только если пользователь в списке, но без проверки на админа группы
+    else:
+        # В группе – только администраторы
+        try:
+            member = await chat.get_member(user_id)
+            if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
+                await update.message.reply_html("⛔ Только администраторы могут использовать эту команду в группе.")
+                return
+        except Exception:
+            await update.message.reply_html("❌ Ошибка проверки прав.")
+            return
+
     try:
         topics = get_all_open_topics()
         if not topics:
@@ -289,6 +341,50 @@ async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Ошибка в /forceremind: {e}", exc_info=True)
         await update.message.reply_html(f"❌ Ошибка: {e}")
+
+async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat = update.effective_chat
+    chat_type = chat.type
+    logger.info(f"/showdb от {user_id} в {chat_type}")
+
+    if chat_type == "private":
+        if not is_private_chat_allowed(user_id):
+            await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
+            return
+        # Разрешаем в ЛС только для разрешённых пользователей
+    else:
+        # В группе – только администраторы
+        try:
+            member = await chat.get_member(user_id)
+            if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
+                await update.message.reply_html("⛔ Только администраторы могут использовать эту команду в группе.")
+                return
+        except Exception:
+            await update.message.reply_html("❌ Ошибка проверки прав.")
+            return
+
+    try:
+        rows = get_all_topics()
+        if not rows:
+            await update.message.reply_html("📭 База данных пуста.")
+            return
+        context.user_data['showdb_rows'] = rows
+        await send_showdb_page(update, context, 0)
+    except Exception as e:
+        logger.error(f"Ошибка в /showdb: {e}", exc_info=True)
+        await update.message.reply_html(f"❌ Ошибка: {e}")
+
+async def showdb_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    if data == "showdb_close":
+        await query.edit_message_text("❌ Закрыто.")
+        await query.answer()
+        return
+    if data.startswith("showdb_page_"):
+        page = int(data.split("_")[2])
+        await send_showdb_page(update, context, page)
 
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
