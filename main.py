@@ -11,15 +11,12 @@ from utils import send_notification, is_topic_closed_on_page
 from bot_handlers import register_handlers
 from logger import setup_logger
 
-# Настройка логирования
 logger = setup_logger()
 logger.info(f"Папка данных: {DATA_DIR}")
 
-# Инициализация БД
 init_db()
 logger.info("База данных инициализирована")
 
-# Загрузка ID группы и темы из файлов
 if os.path.exists(GROUP_ID_FILE):
     with open(GROUP_ID_FILE, "r") as f:
         saved_group = f.read().strip()
@@ -61,10 +58,12 @@ async def check_reminders():
                 update_topic_closed_status(topic_id, is_closed=True)
                 logger.info(f"Тема '{title}' закрыта, повторное уведомление не отправляем.")
             else:
-                message = f"⏰ **Есть не закрытая тема!**\n\n" \
-                          f"**Название:** {title}\n" \
-                          f"**Автор:** {author}\n" \
-                          f"**Ссылка:** {url}"
+                message = (
+                    f"⏰ <b>Есть не закрытая тема!</b>\n\n"
+                    f"<b>Название:</b> {title}\n"
+                    f"<b>Автор:</b> {author}\n"
+                    f"<a href='{url}'>Ссылка</a>"
+                )
                 await send_notification(message)
                 mark_reminder_sent(topic_id)
                 logger.info(f"Отправлено повторное уведомление для темы '{title}'.")
