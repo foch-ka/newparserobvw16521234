@@ -64,7 +64,11 @@ async def check_reminders():
                 update_topic_closed_status(topic_id, is_closed=True)
                 logger.info(f"Тема '{title}' закрыта, повторное уведомление не отправляем.")
             else:
-                message = f"⏰ **Напоминание!**\n\nТема **'{title}'** от **{author}** всё ещё открыта.\nСсылка: {url}"
+                # Текст повторного уведомления изменён на "Есть не закрытая тема"
+                message = f"⏰ **Есть не закрытая тема!**\n\n" \
+                          f"**Название:** {title}\n" \
+                          f"**Автор:** {author}\n" \
+                          f"**Ссылка:** {url}"
                 await send_notification(message)
                 mark_reminder_sent(topic_id)
                 logger.info(f"Отправлено повторное уведомление для темы '{title}'.")
