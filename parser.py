@@ -42,10 +42,8 @@ def parse_topics(html, section_key):
         items = soup.find_all('li', class_=lambda c: c and 'dataItem' in c)
     if not items:
         items = soup.find_all('div', class_=lambda c: c and ('topic' in c.lower() or 'thread' in c.lower()))
-    if not items:
-        items = soup.find_all(class_=lambda c: c and 'topic' in c.lower())
 
-    logger.info(f"Найдено элементов для разбора: {len(items)}")
+    logger.info(f"Найдено элементов: {len(items)}")
 
     for item in items:
         if isinstance(item.get('class'), list) and 'ipsDataItem_pinned' in item.get('class', []):
@@ -72,7 +70,7 @@ def parse_topics(html, section_key):
 
         topic_id = extract_numeric_id(link)
         if not topic_id:
-            logger.warning(f"Не удалось извлечь ID из ссылки: {link}")
+            logger.warning(f"Не удалось извлечь ID: {link}")
             continue
 
         author = "Неизвестный"
@@ -109,10 +107,10 @@ def parse_topics(html, section_key):
 async def parse_section(section_key):
     url = FORUM_URLS.get(section_key)
     if not url:
-        logger.warning(f"Нет URL для раздела {section_key}")
+        logger.warning(f"Нет URL для {section_key}")
         return
 
-    logger.info(f"Парсинг раздела {section_key}: {url}")
+    logger.info(f"Парсинг {section_key}: {url}")
     html = await fetch_html(url)
     if not html:
         return
@@ -133,7 +131,7 @@ async def parse_section(section_key):
         all_ids.append(topic_id)
 
         if topic_exists(topic_id):
-            logger.debug(f"Тема {topic_id} уже есть, пропускаем")
+            logger.debug(f"Тема {topic_id} уже есть")
             continue
 
         logger.info(f"🆕 НОВАЯ ТЕМА: {t['title']} (ID: {topic_id})")
@@ -142,7 +140,6 @@ async def parse_section(section_key):
 
         if not is_closed:
             section_name = SECTION_NAMES.get(section_key, section_key)
-            # HTML-разметка
             msg = (
                 f"🆕 <b>Новая тема</b> в разделе <i>{section_name}</i>\n\n"
                 f"📌 <b>Тема:</b> {t['title']}\n"
