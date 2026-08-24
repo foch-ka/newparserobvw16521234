@@ -12,12 +12,15 @@ from utils import send_notification, is_topic_closed_on_page
 from bot_handlers import register_handlers
 from logger import setup_logger
 
+# Настройка логирования
 logger = setup_logger()
 logger.info(f"Папка данных: {DATA_DIR}")
 
+# Инициализация БД
 init_db()
 logger.info("База данных инициализирована")
 
+# Загрузка ID группы и темы из файлов
 if os.path.exists(GROUP_ID_FILE):
     with open(GROUP_ID_FILE, "r") as f:
         saved_group = f.read().strip()
@@ -40,15 +43,17 @@ logger.info(f"CHECK_INTERVAL={CHECK_INTERVAL} мин, REMINDER_INTERVAL={REMINDE
 logger.info(f"GROUP_CHAT_ID={GROUP_CHAT_ID}, TOPIC_ID={TOPIC_ID}")
 
 async def run_parsers():
+    """Запускает парсинг всех разделов."""
     logger.info("Запуск парсеров...")
     for key in FORUM_URLS:
         logger.info(f"Парсинг: {key} -> {FORUM_URLS[key]}")
         await parse_section(key)
 
 async def check_reminders():
+    """Проверяет темы, которым уже >24 часов, и отправляет повторные уведомления."""
     logger.info("=== Проверка напоминаний ===")
     try:
-        # Логируем все темы из таблицы для отладки
+        # Логируем все темы из БД для отладки
         conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT topic_id, title, first_notified, reminder_sent, is_closed FROM pending_reminders")
@@ -59,6 +64,7 @@ async def check_reminders():
             logger.info(f"Тема: {row['title']}, first_notified: {row['first_notified']}, "
                         f"reminder_sent: {row['reminder_sent']}, is_closed: {row['is_closed']}")
 
+        # Получаем темы, которые уже готовы к повторному уведомлению
         topics = get_topics_for_reminder()
         logger.info(f"Тем для напоминания (по условиям): {len(topics)}")
         for topic in topics:
@@ -80,16 +86,19 @@ async def check_reminders():
         logger.error(f"Ошибка в check_reminders: {e}", exc_info=True)
 
 async def scheduled_jobs():
+    """Планировщик задач."""
     scheduler = AsyncIOScheduler()
     scheduler.add_job(run_parsers, 'interval', minutes=CHECK_INTERVAL)
     scheduler.add_job(check_reminders, 'interval', minutes=REMINDER_INTERVAL)
     scheduler.start()
     logger.info(f"Планировщик запущен.")
+    # Первый запуск сразу
     await run_parsers()
     while True:
         await asyncio.sleep(60)
 
 async def run_bot():
+    """Запуск Telegram-бота."""
     logger.info("Запуск Telegram-бота...")
     try:
         app = Application.builder().token(TOKEN).build()
