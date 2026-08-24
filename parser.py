@@ -3,8 +3,7 @@ from bs4 import BeautifulSoup
 from config import FORUM_URLS, SECTION_NAMES, HEADERS
 from database import (
     get_last_seen, update_last_seen, 
-    add_topic_for_reminder, topic_exists,
-    update_topic_closed_status
+    add_topic_for_reminder, topic_exists
 )
 from utils import send_notification, is_topic_closed_on_page, extract_topic_id_from_url
 
@@ -52,7 +51,7 @@ def parse_section(section_key):
         if not is_closed:
             if "ipsDataItem_closed" in item.get("class", []):
                 is_closed = True
-        
+
         add_topic_for_reminder(topic_id, section_key, title, author, topic_url, is_closed)
         if not is_closed:
             section_name = SECTION_NAMES.get(section_key, section_key)
