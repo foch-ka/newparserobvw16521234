@@ -79,6 +79,7 @@ def mark_reminder_sent(topic_id):
     conn.close()
 
 def get_topics_for_reminder():
+    """Возвращает темы, у которых прошло >=24 часа, reminder_sent=0 и is_closed=0."""
     conn = get_db_connection()
     c = conn.cursor()
     threshold = datetime.now() - timedelta(hours=24)
@@ -124,7 +125,7 @@ def get_ping_users(chat_id):
 
 # ---------- Для отладки ----------
 def get_all_topics():
-    """Возвращает все темы из таблицы pending_reminders (для отладки)."""
+    """Возвращает все темы из таблицы pending_reminders (для команды /showdb)."""
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT topic_id, title, first_notified, reminder_sent, is_closed FROM pending_reminders")
