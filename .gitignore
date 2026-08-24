@@ -1,5 +1,6 @@
 .env
 group_id.txt
 *.db
+*.log
 __pycache__/
 *.pyc
