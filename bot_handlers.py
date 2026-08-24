@@ -3,7 +3,10 @@ import os
 from telegram import Update, ChatMember
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE
-from database import add_ping_user, remove_ping_user, get_ping_users, get_all_topics, get_topics_for_reminder, mark_reminder_sent
+from database import (
+    add_ping_user, remove_ping_user, get_ping_users,
+    get_all_topics, get_topics_for_reminder, mark_reminder_sent
+)
 from utils import send_notification
 
 logger = logging.getLogger(__name__)
@@ -18,7 +21,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/removeping – удалить пользователя\n"
         "/listpings – список пользователей для упоминаний\n"
         "/test – отправить тестовое сообщение\n"
-        "/forceremind – принудительно отправить напоминания\n"
+        "/forceremind – принудительно отправить напоминания (для отладки)\n"
         "/showdb – показать все темы из БД"
     )
 
@@ -190,49 +193,47 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/forceremind от {update.effective_user.id}")
-    topics = get_topics_for_reminder()
-    if not topics:
-        await update.message.reply_html("Нет тем для напоминания.")
-        return
-    count = 0
-    for topic in topics:
-        topic_id, section_key, title, author, url = topic
-        msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
-              f"<b>Название:</b> {title}\n" \
-              f"<b>Автор:</b> {author}\n" \
-              f"<a href='{url}'>Ссылка</a>"
-        await send_notification(msg)
-        mark_reminder_sent(topic_id)
-        count += 1
-    await update.message.reply_html(f"✅ Отправлено напоминаний: {count}")
+    try:
+        topics = get_topics_for_reminder()
+        if not topics:
+            await update.message.reply_html("📭 Нет тем для напоминания.")
+            return
+        count = 0
+        for topic in topics:
+            topic_id, section_key, title, author, url = topic
+            msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
+                  f"<b>Название:</b> {title}\n" \
+                  f"<b>Автор:</b> {author}\n" \
+                  f"<a href='{url}'>Ссылка</a>"
+            await send_notification(msg)
+            mark_reminder_sent(topic_id)
+            count += 1
+        await update.message.reply_html(f"✅ Отправлено напоминаний: {count}")
+    except Exception as e:
+        logger.error(f"Ошибка в /forceremind: {e}", exc_info=True)
+        await update.message.reply_html(f"❌ Ошибка: {e}")
 
 async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    chat = update.effective_chat
+    logger.info(f"/showdb от {update.effective_user.id}")
     try:
-        member = await chat.get_member(user.id)
-        if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
-            await update.message.reply_html("⛔ Только для администраторов.")
+        rows = get_all_topics()
+        if not rows:
+            await update.message.reply_html("📭 База данных пуста.")
             return
-    except Exception:
-        await update.message.reply_html("❌ Ошибка проверки прав.")
-        return
-
-    rows = get_all_topics()
-    if not rows:
-        await update.message.reply_html("📭 База данных пуста.")
-        return
-    text = "📋 <b>Темы в БД:</b>\n\n"
-    for row in rows:
-        text += f"ID: <code>{row['topic_id']}</code>\n"
-        text += f"Название: {row['title']}\n"
-        text += f"Первое уведомление: {row['first_notified']}\n"
-        text += f"Напомнено: {row['reminder_sent']}, Закрыта: {row['is_closed']}\n"
-        text += "---\n"
-        if len(text) > 3500:
-            text += "... (слишком много тем, обрезано)"
-            break
-    await update.message.reply_html(text)
+        text = "📋 <b>Темы в БД:</b>\n\n"
+        for row in rows:
+            text += f"ID: <code>{row['topic_id']}</code>\n"
+            text += f"Название: {row['title']}\n"
+            text += f"Первое уведомление: {row['first_notified']}\n"
+            text += f"Напомнено: {row['reminder_sent']}, Закрыта: {row['is_closed']}\n"
+            text += "---\n"
+            if len(text) > 3500:
+                text += "... (слишком много тем, обрезано)"
+                break
+        await update.message.reply_html(text)
+    except Exception as e:
+        logger.error(f"Ошибка в /showdb: {e}", exc_info=True)
+        await update.message.reply_html(f"❌ Ошибка: {e}")
 
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
