@@ -15,7 +15,6 @@ PAGE_SIZE = 5
 
 # ---------- Вспомогательная функция проверки доступа в ЛС ----------
 def is_private_chat_allowed(user_id: int) -> bool:
-    """Проверяет, разрешён ли пользователь для работы в ЛС."""
     return user_id in ALLOWED_USERS
 
 # ---------- Пагинация /showdb ----------
@@ -66,7 +65,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = update.effective_chat.type
     logger.info(f"/start от {user_id} в {chat_type}")
 
-    # Если это ЛС – проверяем доступ
     if chat_type == "private" and not is_private_chat_allowed(user_id):
         await update.message.reply_html("⛔ У вас нет доступа к боту в личных сообщениях.")
         return
@@ -89,16 +87,13 @@ async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_type = chat.type
     logger.info(f"/setgroup от {user_id} в {chat_type}")
 
-    # В ЛС – проверяем доступ
     if chat_type == "private":
         if not is_private_chat_allowed(user_id):
             await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
             return
-        # В ЛС команда не имеет смысла, но можно разрешить админам
         await update.message.reply_html("⚠️ Эта команда работает только в группах.")
         return
 
-    # В группе – проверяем админа
     if chat_type not in ["group", "supergroup"]:
         await update.message.reply_html("⚠️ Только в группах.")
         return
@@ -167,12 +162,14 @@ async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif context.args:
         arg = context.args[0]
         if arg.startswith('@'):
+            username = arg[1:]  # убираем @
             try:
-                chat_member = await chat.get_member(arg)
+                chat_member = await chat.get_member(username)
                 target_user_id = chat_member.user.id
-                target_username = arg[1:]
-            except Exception:
-                await update.message.reply_html("Не найден пользователь.")
+                target_username = chat_member.user.username or username
+            except Exception as e:
+                logger.error(f"Ошибка поиска пользователя @{username}: {e}")
+                await update.message.reply_html("Не найден пользователь с таким username в этой группе.")
                 return
         else:
             try:
@@ -228,11 +225,12 @@ async def removeping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif context.args:
         arg = context.args[0]
         if arg.startswith('@'):
+            username = arg[1:]
             try:
-                chat_member = await chat.get_member(arg)
+                chat_member = await chat.get_member(username)
                 target_user_id = chat_member.user.id
             except Exception:
-                await update.message.reply_html("Не найден пользователь.")
+                await update.message.reply_html("Не найден пользователь с таким username в этой группе.")
                 return
         else:
             try:
@@ -302,9 +300,7 @@ async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_private_chat_allowed(user_id):
             await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
             return
-        # В ЛС разрешаем выполнять только если пользователь в списке, но без проверки на админа группы
     else:
-        # В группе – только администраторы
         try:
             member = await chat.get_member(user_id)
             if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
@@ -352,9 +348,7 @@ async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_private_chat_allowed(user_id):
             await update.message.reply_html("⛔ У вас нет доступа к этой команде в ЛС.")
             return
-        # Разрешаем в ЛС только для разрешённых пользователей
     else:
-        # В группе – только администраторы
         try:
             member = await chat.get_member(user_id)
             if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
