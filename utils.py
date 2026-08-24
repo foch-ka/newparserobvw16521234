@@ -18,7 +18,7 @@ async def send_notification(text):
     mentions = []
     for user in ping_users:
         user_id = user['user_id']
-        username = user.get('username', str(user_id))
+        username = user['username'] if user['username'] else str(user_id)
         mentions.append(f'<a href="tg://user?id={user_id}">@{username}</a>')
 
     if mentions:
