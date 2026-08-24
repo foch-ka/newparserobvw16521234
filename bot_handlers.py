@@ -1,7 +1,6 @@
 import logging
-import os
-from telegram import Update, ChatMember
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE
 from database import (
     add_ping_user, remove_ping_user, get_ping_users,
@@ -12,6 +11,78 @@ from utils import send_notification, is_topic_closed_on_page
 
 logger = logging.getLogger(__name__)
 
+PAGE_SIZE = 5  # количество тем на одной странице
+
+# ---------- Вспомогательная функция для отправки страницы /showdb ----------
+async def send_showdb_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
+    rows = context.user_data.get('showdb_rows')
+    if not rows:
+        await update.callback_query.edit_message_text("📭 База данных пуста.")
+        return
+
+    total = len(rows)
+    total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
+    if page < 0 or page >= total_pages:
+        page = 0
+
+    start = page * PAGE_SIZE
+    end = min(start + PAGE_SIZE, total)
+    page_rows = rows[start:end]
+
+    text = f"📋 <b>Темы в БД</b> (страница {page+1}/{total_pages}):\n\n"
+    for row in page_rows:
+        text += f"ID: <code>{row['topic_id']}</code>\n"
+        text += f"Название: {row['title']}\n"
+        text += f"Первое уведомление: {row['first_notified']}\n"
+        text += f"Напомнено: {row['reminder_sent']}, Закрыта: {row['is_closed']}\n"
+        text += "---\n"
+
+    keyboard = []
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("◀ Назад", callback_data=f"showdb_page_{page-1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Вперёд ▶", callback_data=f"showdb_page_{page+1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    keyboard.append([InlineKeyboardButton("❌ Закрыть", callback_data="showdb_close")])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=reply_markup)
+        await update.callback_query.answer()
+    else:
+        await update.message.reply_html(text, reply_markup=reply_markup)
+
+# ---------- Обработчик команды /showdb ----------
+async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"/showdb от {update.effective_user.id}")
+    try:
+        rows = get_all_topics()
+        if not rows:
+            await update.message.reply_html("📭 База данных пуста.")
+            return
+        # Сохраняем данные в user_data
+        context.user_data['showdb_rows'] = rows
+        await send_showdb_page(update, context, 0)
+    except Exception as e:
+        logger.error(f"Ошибка в /showdb: {e}", exc_info=True)
+        await update.message.reply_html(f"❌ Ошибка: {e}")
+
+# ---------- Обработчик нажатий на кнопки пагинации ----------
+async def showdb_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+    if data == "showdb_close":
+        await query.edit_message_text("❌ Закрыто.")
+        await query.answer()
+        return
+    if data.startswith("showdb_page_"):
+        page = int(data.split("_")[2])
+        await send_showdb_page(update, context, page)
+
+# ---------- Остальные команды (без изменений) ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/start от {update.effective_user.id}")
     await update.message.reply_html(
@@ -23,7 +94,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/listpings – список пользователей для упоминаний\n"
         "/test – отправить тестовое сообщение\n"
         "/forceremind – принудительно отправить напоминания (с проверкой закрытости)\n"
-        "/showdb – показать все темы из БД"
+        "/showdb – показать все темы из БД (с пагинацией)"
     )
 
 async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -195,7 +266,6 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/forceremind от {update.effective_user.id}")
     try:
-        # Получаем все темы, где reminder_sent=0 и is_closed=0 (по БД)
         topics = get_all_pending_topics()
         if not topics:
             await update.message.reply_html("📭 Нет открытых тем для напоминания (по данным БД).")
@@ -203,15 +273,12 @@ async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sent_count = 0
         for topic in topics:
             topic_id, section_key, title, author, url = topic
-            # Проверяем актуальный статус закрытости на странице
             logger.info(f"Проверка закрытости для '{title}'")
             is_closed_now = await is_topic_closed_on_page(url)
             if is_closed_now:
-                # Обновляем статус в БД и пропускаем
                 update_topic_closed_status(topic_id, is_closed=True)
                 logger.info(f"Тема '{title}' закрыта, пропускаем, обновлён is_closed=1")
                 continue
-            # Тема открыта – отправляем напоминание
             msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
                   f"<b>Название:</b> {title}\n" \
                   f"<b>Автор:</b> {author}\n" \
@@ -225,28 +292,6 @@ async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Ошибка в /forceremind: {e}", exc_info=True)
         await update.message.reply_html(f"❌ Ошибка: {e}")
 
-async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/showdb от {update.effective_user.id}")
-    try:
-        rows = get_all_topics()
-        if not rows:
-            await update.message.reply_html("📭 База данных пуста.")
-            return
-        text = "📋 <b>Темы в БД:</b>\n\n"
-        for row in rows:
-            text += f"ID: <code>{row['topic_id']}</code>\n"
-            text += f"Название: {row['title']}\n"
-            text += f"Первое уведомление: {row['first_notified']}\n"
-            text += f"Напомнено: {row['reminder_sent']}, Закрыта: {row['is_closed']}\n"
-            text += "---\n"
-            if len(text) > 3500:
-                text += "... (слишком много тем, обрезано)"
-                break
-        await update.message.reply_html(text)
-    except Exception as e:
-        logger.error(f"Ошибка в /showdb: {e}", exc_info=True)
-        await update.message.reply_html(f"❌ Ошибка: {e}")
-
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setgroup", setgroup))
@@ -256,3 +301,5 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("test", test))
     app.add_handler(CommandHandler("forceremind", forceremind))
     app.add_handler(CommandHandler("showdb", showdb))
+    # Обработчик кнопок пагинации
+    app.add_handler(CallbackQueryHandler(showdb_callback, pattern="^showdb_"))
