@@ -5,7 +5,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE
 from database import (
     add_ping_user, remove_ping_user, get_ping_users,
-    get_all_topics, get_topics_for_reminder, mark_reminder_sent
+    get_all_topics, get_all_pending_topics, mark_reminder_sent
 )
 from utils import send_notification
 
@@ -21,7 +21,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/removeping – удалить пользователя\n"
         "/listpings – список пользователей для упоминаний\n"
         "/test – отправить тестовое сообщение\n"
-        "/forceremind – принудительно отправить напоминания (для отладки)\n"
+        "/forceremind – принудительно отправить напоминания (для всех открытых тем)\n"
         "/showdb – показать все темы из БД"
     )
 
@@ -194,9 +194,10 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/forceremind от {update.effective_user.id}")
     try:
-        topics = get_topics_for_reminder()
+        # БЕРЁМ ВСЕ ТЕМЫ, НЕЗАВИСИМО ОТ ВРЕМЕНИ
+        topics = get_all_pending_topics()
         if not topics:
-            await update.message.reply_html("📭 Нет тем для напоминания.")
+            await update.message.reply_html("📭 Нет открытых тем для напоминания.")
             return
         count = 0
         for topic in topics:
