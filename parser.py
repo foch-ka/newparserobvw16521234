@@ -1,3 +1,4 @@
+import logging
 import aiohttp
 from bs4 import BeautifulSoup
 from config import FORUM_URLS, SECTION_NAMES, HEADERS
@@ -7,9 +8,12 @@ from database import (
 )
 from utils import send_notification, is_topic_closed_on_page, extract_topic_id_from_url
 
+logger = logging.getLogger(__name__)
+
 async def parse_section(section_key):
     url = FORUM_URLS.get(section_key)
     if not url:
+        logger.warning(f"Нет URL для раздела {section_key}")
         return
 
     try:
@@ -17,7 +21,7 @@ async def parse_section(section_key):
             async with session.get(url, headers=HEADERS, timeout=15) as resp:
                 html = await resp.text()
     except Exception as e:
-        print(f"Ошибка при запросе к {url}: {e}")
+        logger.error(f"Ошибка при запросе к {url}: {e}", exc_info=True)
         return
 
     soup = BeautifulSoup(html, "html.parser")
@@ -26,7 +30,7 @@ async def parse_section(section_key):
     if not topic_items:
         topic_items = soup.select("div.ipsDataItem")
     if not topic_items:
-        print(f"Не удалось найти темы в разделе {section_key}")
+        logger.warning(f"Не удалось найти темы в разделе {section_key}")
         return
 
     new_topics_found = False
@@ -62,9 +66,9 @@ async def parse_section(section_key):
                       f"**Автор:** {author}\n" \
                       f"**Ссылка:** {topic_url}"
             await send_notification(message)
-            print(f"[{section_key}] Новая открытая тема: {title}")
+            logger.info(f"[{section_key}] Новая открытая тема: {title}")
         else:
-            print(f"[{section_key}] Новая тема, но закрыта: {title}")
+            logger.info(f"[{section_key}] Новая тема, но закрыта: {title}")
         new_topics_found = True
 
     if new_topics_found and topic_items:
@@ -73,3 +77,4 @@ async def parse_section(section_key):
             first_id = extract_topic_id_from_url(first_topic_url)
             if first_id:
                 update_last_seen(section_key, first_id)
+                logger.debug(f"Обновлён last_seen для {section_key}: {first_id}")
