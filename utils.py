@@ -19,7 +19,8 @@ async def send_notification(text):
     for user in ping_users:
         user_id = user['user_id']
         username = user.get('username', str(user_id))
-        mentions.append(f"[@{username}](tg://user?id={user_id})")
+        # Используем HTML-тег для упоминания
+        mentions.append(f'<a href="tg://user?id={user_id}">@{username}</a>')
 
     if mentions:
         text += "\n\n🔔 Упоминания: " + " ".join(mentions)
@@ -28,8 +29,9 @@ async def send_notification(text):
         result = await bot.send_message(
             chat_id=GROUP_CHAT_ID,
             text=text,
-            parse_mode="Markdown",
-            message_thread_id=TOPIC_ID
+            parse_mode="HTML",
+            message_thread_id=TOPIC_ID,
+            disable_web_page_preview=True
         )
         logger.info(f"✅ Уведомление отправлено в группу {GROUP_CHAT_ID}, тема {TOPIC_ID}. ID сообщения: {result.message_id}")
     except Exception as e:
@@ -42,7 +44,6 @@ async def is_topic_closed_on_page(topic_url):
             async with session.get(topic_url, headers=HEADERS, timeout=10) as resp:
                 html = await resp.text()
                 soup = BeautifulSoup(html, "html.parser")
-                # Проверяем несколько признаков закрытости
                 if soup.find(string=lambda t: t and ("закрыта" in t or "closed" in t.lower()) and "сообщений" in t):
                     return True
                 if soup.select_one("i.fa-lock"):
@@ -52,10 +53,9 @@ async def is_topic_closed_on_page(topic_url):
                 return False
     except Exception as e:
         logger.error(f"Ошибка при проверке закрытости {topic_url}: {e}")
-        return False  # считаем открытой при ошибке
+        return False
 
 def extract_topic_id_from_url(url):
-    # Оставляем для совместимости (может пригодиться)
     import re
     match = re.search(r'/topic/(\d+)-', url)
     if match:
