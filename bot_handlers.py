@@ -1,7 +1,7 @@
 import logging
 from telegram import Update, ChatMember, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE
+from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE, SECTION_NAMES
 from database import (
     add_ping_user, remove_ping_user, get_ping_users,
     get_all_topics, get_all_open_topics, mark_reminder_sent,
@@ -263,7 +263,6 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/forceremind от {update.effective_user.id}")
     try:
-        # Получаем ВСЕ открытые темы (is_closed=0) независимо от reminder_sent
         topics = get_all_open_topics()
         if not topics:
             await update.message.reply_html("📭 Нет открытых тем для напоминания.")
@@ -277,16 +276,15 @@ async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update_topic_closed_status(topic_id, is_closed=True)
                 logger.info(f"Тема '{title}' закрыта, пропускаем, обновлён is_closed=1")
                 continue
-            # Отправляем напоминание
-            msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
+            section_name = SECTION_NAMES.get(section_key, section_key)
+            msg = f"⏰ <b>Есть не закрытая тема</b> в разделе <i>{section_name}</i>!\n\n" \
                   f"<b>Название:</b> {title}\n" \
                   f"<b>Автор:</b> {author}\n" \
                   f"<a href='{url}'>Ссылка</a>"
             await send_notification(msg)
-            # Сбрасываем reminder_sent и обновляем first_notified на текущее время
             reset_reminder(topic_id)
             sent_count += 1
-            logger.info(f"Отправлено напоминание для '{title}', флаг сброшен")
+            logger.info(f"Отправлено напоминание для '{title}' (раздел {section_name}), флаг сброшен")
         await update.message.reply_html(f"✅ Отправлено напоминаний: {sent_count}")
     except Exception as e:
         logger.error(f"Ошибка в /forceremind: {e}", exc_info=True)
