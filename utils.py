@@ -1,15 +1,16 @@
+import logging
 import aiohttp
 from bs4 import BeautifulSoup
 from telegram import Bot
 from config import TOKEN, HEADERS, GROUP_CHAT_ID
 from database import get_ping_users
 
+logger = logging.getLogger(__name__)
 bot = Bot(token=TOKEN)
 
 async def send_notification(text):
-    """Отправляет сообщение в группу с упоминаниями."""
     if GROUP_CHAT_ID is None:
-        print("GROUP_CHAT_ID не задан, сообщение не отправлено.")
+        logger.warning("GROUP_CHAT_ID не задан, сообщение не отправлено.")
         return
 
     ping_users = get_ping_users(GROUP_CHAT_ID)
@@ -24,11 +25,11 @@ async def send_notification(text):
 
     try:
         await bot.send_message(chat_id=GROUP_CHAT_ID, text=text, parse_mode="Markdown")
+        logger.info(f"Уведомление отправлено в группу {GROUP_CHAT_ID}")
     except Exception as e:
-        print(f"Ошибка отправки в группу {GROUP_CHAT_ID}: {e}")
+        logger.error(f"Ошибка отправки в группу {GROUP_CHAT_ID}: {e}", exc_info=True)
 
 async def is_topic_closed_on_page(topic_url):
-    """Асинхронно проверяет, закрыта ли тема."""
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(topic_url, headers=HEADERS, timeout=10) as resp:
@@ -40,7 +41,7 @@ async def is_topic_closed_on_page(topic_url):
                     return True
                 return False
     except Exception as e:
-        print(f"Ошибка при проверке закрытости темы {topic_url}: {e}")
+        logger.error(f"Ошибка при проверке закрытости темы {topic_url}: {e}", exc_info=True)
         return False
 
 def extract_topic_id_from_url(url):
