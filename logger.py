@@ -9,14 +9,19 @@ def setup_logger():
         '[%(asctime)s] %(levelname)s [%(name)s:%(lineno)d] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+    # Обязательно выводим в консоль (для BotHost)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    file_handler = RotatingFileHandler(
-        'bot.log', maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'
-    )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    # В файл (на всякий случай)
+    try:
+        file_handler = RotatingFileHandler(
+            'bot.log', maxBytes=5*1024*1024, backupCount=5, encoding='utf-8'
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except:
+        pass
 
     return logger
