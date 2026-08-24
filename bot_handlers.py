@@ -5,9 +5,10 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE
 from database import (
     add_ping_user, remove_ping_user, get_ping_users,
-    get_all_topics, get_all_pending_topics, mark_reminder_sent
+    get_all_topics, get_all_pending_topics, mark_reminder_sent,
+    update_topic_closed_status
 )
-from utils import send_notification
+from utils import send_notification, is_topic_closed_on_page
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/removeping – удалить пользователя\n"
         "/listpings – список пользователей для упоминаний\n"
         "/test – отправить тестовое сообщение\n"
-        "/forceremind – принудительно отправить напоминания (для всех открытых тем)\n"
+        "/forceremind – принудительно отправить напоминания (с проверкой закрытости)\n"
         "/showdb – показать все темы из БД"
     )
 
@@ -194,22 +195,32 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/forceremind от {update.effective_user.id}")
     try:
-        # БЕРЁМ ВСЕ ТЕМЫ, НЕЗАВИСИМО ОТ ВРЕМЕНИ
+        # Получаем все темы, где reminder_sent=0 и is_closed=0 (по БД)
         topics = get_all_pending_topics()
         if not topics:
-            await update.message.reply_html("📭 Нет открытых тем для напоминания.")
+            await update.message.reply_html("📭 Нет открытых тем для напоминания (по данным БД).")
             return
-        count = 0
+        sent_count = 0
         for topic in topics:
             topic_id, section_key, title, author, url = topic
+            # Проверяем актуальный статус закрытости на странице
+            logger.info(f"Проверка закрытости для '{title}'")
+            is_closed_now = await is_topic_closed_on_page(url)
+            if is_closed_now:
+                # Обновляем статус в БД и пропускаем
+                update_topic_closed_status(topic_id, is_closed=True)
+                logger.info(f"Тема '{title}' закрыта, пропускаем, обновлён is_closed=1")
+                continue
+            # Тема открыта – отправляем напоминание
             msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
                   f"<b>Название:</b> {title}\n" \
                   f"<b>Автор:</b> {author}\n" \
                   f"<a href='{url}'>Ссылка</a>"
             await send_notification(msg)
             mark_reminder_sent(topic_id)
-            count += 1
-        await update.message.reply_html(f"✅ Отправлено напоминаний: {count}")
+            sent_count += 1
+            logger.info(f"Отправлено напоминание для '{title}'")
+        await update.message.reply_html(f"✅ Отправлено напоминаний: {sent_count}")
     except Exception as e:
         logger.error(f"Ошибка в /forceremind: {e}", exc_info=True)
         await update.message.reply_html(f"❌ Ошибка: {e}")
