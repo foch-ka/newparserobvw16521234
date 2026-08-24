@@ -3,13 +3,13 @@ import os
 from telegram import Update, ChatMember
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE
-from database import add_ping_user, remove_ping_user, get_ping_users
+from database import add_ping_user, remove_ping_user, get_ping_users, get_all_topics, get_topics_for_reminder, mark_reminder_sent
 from utils import send_notification
 
 logger = logging.getLogger(__name__)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"Команда /start от {update.effective_user.id}")
+    logger.info(f"/start от {update.effective_user.id}")
     await update.message.reply_html(
         "👋 Я бот для отслеживания новых тем на форуме VimeWorld.\n\n"
         "<b>Команды для администраторов:</b>\n"
@@ -18,17 +18,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/removeping – удалить пользователя\n"
         "/listpings – список пользователей для упоминаний\n"
         "/test – отправить тестовое сообщение\n"
-        "/forceremind – принудительно отправить напоминание для всех тем (для отладки)"
+        "/forceremind – принудительно отправить напоминания\n"
+        "/showdb – показать все темы из БД"
     )
 
 async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     user = update.effective_user
     topic_id = update.effective_message.message_thread_id
-    logger.info(f"/setgroup от {user.id} в чате {chat.id}, тема {topic_id}")
+    logger.info(f"/setgroup от {user.id} в {chat.id}, тема {topic_id}")
 
     if chat.type not in ["group", "supergroup"]:
-        await update.message.reply_html("⚠️ Эта команда работает только в группах.")
+        await update.message.reply_html("⚠️ Только в группах.")
         return
 
     try:
@@ -37,7 +38,7 @@ async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_html("⛔ Только администраторы.")
             return
     except Exception as e:
-        logger.error(f"Ошибка проверки прав: {e}")
+        logger.error(f"Ошибка прав: {e}")
         await update.message.reply_html("❌ Не удалось проверить права.")
         return
 
@@ -80,7 +81,6 @@ async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user_id = None
     target_username = None
 
-    # Исправлено: проверяем наличие reply_to_message и args
     if update.message.reply_to_message:
         target_user_id = update.message.reply_to_message.from_user.id
         target_username = update.message.reply_to_message.from_user.username
@@ -189,9 +189,7 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_html("✅ Тестовое сообщение отправлено.")
 
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Принудительно отправляет напоминания для всех тем, у которых reminder_sent=0 (для отладки)."""
     logger.info(f"/forceremind от {update.effective_user.id}")
-    from database import get_topics_for_reminder, mark_reminder_sent
     topics = get_topics_for_reminder()
     if not topics:
         await update.message.reply_html("Нет тем для напоминания.")
@@ -208,6 +206,34 @@ async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         count += 1
     await update.message.reply_html(f"✅ Отправлено напоминаний: {count}")
 
+async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    chat = update.effective_chat
+    try:
+        member = await chat.get_member(user.id)
+        if member.status not in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]:
+            await update.message.reply_html("⛔ Только для администраторов.")
+            return
+    except Exception:
+        await update.message.reply_html("❌ Ошибка проверки прав.")
+        return
+
+    rows = get_all_topics()
+    if not rows:
+        await update.message.reply_html("📭 База данных пуста.")
+        return
+    text = "📋 <b>Темы в БД:</b>\n\n"
+    for row in rows:
+        text += f"ID: <code>{row['topic_id']}</code>\n"
+        text += f"Название: {row['title']}\n"
+        text += f"Первое уведомление: {row['first_notified']}\n"
+        text += f"Напомнено: {row['reminder_sent']}, Закрыта: {row['is_closed']}\n"
+        text += "---\n"
+        if len(text) > 3500:
+            text += "... (слишком много тем, обрезано)"
+            break
+    await update.message.reply_html(text)
+
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setgroup", setgroup))
@@ -216,3 +242,4 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("listpings", listpings))
     app.add_handler(CommandHandler("test", test))
     app.add_handler(CommandHandler("forceremind", forceremind))
+    app.add_handler(CommandHandler("showdb", showdb))
