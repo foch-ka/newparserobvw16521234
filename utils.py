@@ -42,23 +42,22 @@ async def is_topic_closed_on_page(topic_url):
             async with session.get(topic_url, headers=HEADERS, timeout=10) as resp:
                 html = await resp.text()
                 soup = BeautifulSoup(html, "html.parser")
-                # Проверяем текст "закрыта" и иконку замка
-                if soup.find(string=lambda t: t and "закрыта" in t and "сообщений" in t):
+                # Проверяем несколько признаков закрытости
+                if soup.find(string=lambda t: t and ("закрыта" in t or "closed" in t.lower()) and "сообщений" in t):
                     return True
                 if soup.select_one("i.fa-lock"):
+                    return True
+                if soup.select_one("[class*='closed']"):
                     return True
                 return False
     except Exception as e:
         logger.error(f"Ошибка при проверке закрытости {topic_url}: {e}")
-        # В случае ошибки считаем тему открытой, чтобы не пропустить уведомление
-        return False
+        return False  # считаем открытой при ошибке
 
 def extract_topic_id_from_url(url):
-    # Оставляем для совместимости, но в новом парсере не используется
-    parts = url.split("/")
-    for part in parts:
-        if part.startswith("topic-"):
-            return part.split("-")[1]
-        elif part.isdigit() and len(part) > 4:
-            return part
+    # Оставляем для совместимости (может пригодиться)
+    import re
+    match = re.search(r'/topic/(\d+)-', url)
+    if match:
+        return match.group(1)
     return None
