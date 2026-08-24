@@ -24,7 +24,6 @@ if TOPIC_ID:
 else:
     TOPIC_ID = None
 
-# ПРАВИЛЬНЫЕ URL
 FORUM_URLS = {
     "complaint_staff": "https://forum.vimeworld.com/forum/195-%D0%B6%D0%B0%D0%BB%D0%BE%D0%B1%D1%8B-%D0%BD%D0%B0-%D0%BF%D0%B5%D1%80%D1%81%D0%BE%D0%BD%D0%B0%D0%BB/",
     "complaint_player": "https://forum.vimeworld.com/forum/189-%D0%B6%D0%B0%D0%BB%D0%BE%D0%B1%D1%8B-%D0%BD%D0%B0-%D0%B8%D0%B3%D1%80%D0%BE%D0%BA%D0%BE%D0%B2/",
@@ -41,5 +40,7 @@ CHECK_INTERVAL = float(os.getenv("CHECK_INTERVAL", "5.0"))
 REMINDER_INTERVAL = float(os.getenv("REMINDER_INTERVAL", "60.0"))
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3",
 }
