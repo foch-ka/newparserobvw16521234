@@ -76,6 +76,18 @@ def mark_reminder_sent(topic_id):
     conn.commit()
     conn.close()
 
+def reset_reminder(topic_id):
+    """
+    Сбрасывает напоминание для темы: обновляет first_notified на текущее время
+    и устанавливает reminder_sent = 0, чтобы автоматическое напоминание снова могло её подхватить.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("UPDATE pending_reminders SET first_notified = ?, reminder_sent = 0 WHERE topic_id = ?",
+              (datetime.now(), topic_id))
+    conn.commit()
+    conn.close()
+
 def get_topics_for_reminder():
     conn = get_db_connection()
     c = conn.cursor()
@@ -87,12 +99,16 @@ def get_topics_for_reminder():
     conn.close()
     return rows
 
-def get_all_pending_topics():
+def get_all_open_topics():
+    """
+    Возвращает все темы, которые открыты (is_closed=0), независимо от reminder_sent.
+    Используется в /forceremind.
+    """
     conn = get_db_connection()
     c = conn.cursor()
     c.execute('''SELECT topic_id, section_key, title, author, url 
                  FROM pending_reminders 
-                 WHERE reminder_sent = 0 AND is_closed = 0''')
+                 WHERE is_closed = 0''')
     rows = c.fetchall()
     conn.close()
     return rows
