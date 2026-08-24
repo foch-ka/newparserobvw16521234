@@ -2,6 +2,7 @@ import logging
 import aiohttp
 import asyncio
 import re
+import hashlib
 from bs4 import BeautifulSoup
 from config import FORUM_URLS, SECTION_NAMES, HEADERS
 from database import (
@@ -23,18 +24,29 @@ async def fetch_html(url):
         return None
 
 def extract_numeric_id(url):
+    """Извлекает числовой ID темы из ссылки."""
+    if not url:
+        return None
+    # /topic/123456-...
     match = re.search(r'/topic/(\d+)-', url)
     if match:
         return match.group(1)
+    # /123456-... (редко)
     match = re.search(r'/(\d+)(?:-|$)', url)
     if match:
         return match.group(1)
     return None
 
+def generate_fallback_id(url):
+    """Генерирует уникальный ID на основе ссылки (если числовой не извлёкся)."""
+    hash_obj = hashlib.md5(url.encode())
+    return f"fallback_{hash_obj.hexdigest()[:12]}"
+
 def parse_topics(html, section_key):
     soup = BeautifulSoup(html, 'html.parser')
     topics = []
 
+    # Поиск элементов тем – несколько вариантов
     items = soup.find_all('li', class_=lambda c: c and 'ipsDataItem' in c)
     if not items:
         items = soup.find_all(class_=lambda c: c and 'ipsDataItem' in c)
@@ -43,7 +55,7 @@ def parse_topics(html, section_key):
     if not items:
         items = soup.find_all('div', class_=lambda c: c and ('topic' in c.lower() or 'thread' in c.lower()))
 
-    logger.info(f"Найдено элементов: {len(items)}")
+    logger.info(f"[{section_key}] Найдено элементов: {len(items)}")
 
     for item in items:
         if isinstance(item.get('class'), list) and 'ipsDataItem_pinned' in item.get('class', []):
@@ -68,11 +80,13 @@ def parse_topics(html, section_key):
         if link and not link.startswith('http'):
             link = "https://forum.vimeworld.com" + link
 
-        topic_id = extract_numeric_id(link)
-        if not topic_id:
-            logger.warning(f"Не удалось извлечь ID: {link}")
-            continue
+        # Извлекаем ID (числовой или fallback)
+        numeric_id = extract_numeric_id(link)
+        topic_id = numeric_id if numeric_id else generate_fallback_id(link)
+        if not numeric_id:
+            logger.warning(f"[{section_key}] Не удалось извлечь числовой ID из {link}, fallback: {topic_id}")
 
+        # Автор
         author = "Неизвестный"
         meta = item.find('div', class_='ipsDataItem_meta')
         if meta:
@@ -86,6 +100,7 @@ def parse_topics(html, section_key):
                 if author_span:
                     author = author_span.get_text(strip=True)
 
+        # Время
         time_tag = meta.find('time') if meta else None
         if time_tag:
             event_time = time_tag.get_text(strip=True)
@@ -101,7 +116,7 @@ def parse_topics(html, section_key):
             'time': event_time
         })
 
-    logger.info(f"Распарсено тем: {len(topics)}")
+    logger.info(f"[{section_key}] Распарсено тем: {len(topics)}")
     return topics
 
 async def parse_section(section_key):
@@ -117,11 +132,11 @@ async def parse_section(section_key):
 
     topics = parse_topics(html, section_key)
     if not topics:
-        logger.info(f"Тем не найдено в {section_key}")
+        logger.info(f"[{section_key}] Тем не найдено")
         return
 
     last_topic_id = get_last_seen(section_key)
-    logger.info(f"Последний ID для {section_key}: {last_topic_id}")
+    logger.info(f"[{section_key}] Последний ID: {last_topic_id}")
 
     new_topics_found = False
     all_ids = []
@@ -131,10 +146,10 @@ async def parse_section(section_key):
         all_ids.append(topic_id)
 
         if topic_exists(topic_id):
-            logger.debug(f"Тема {topic_id} уже есть")
+            logger.debug(f"[{section_key}] Тема {topic_id} уже есть, пропускаем")
             continue
 
-        logger.info(f"🆕 НОВАЯ ТЕМА: {t['title']} (ID: {topic_id})")
+        logger.info(f"[{section_key}] 🆕 НОВАЯ ТЕМА: {t['title']} (ID: {topic_id})")
         is_closed = await is_topic_closed_on_page(t['link'])
         add_topic_for_reminder(topic_id, section_key, t['title'], t['author'], t['link'], is_closed)
 
@@ -148,9 +163,9 @@ async def parse_section(section_key):
                 f"🔗 <a href='{t['link']}'>Ссылка</a>"
             )
             await send_notification(msg)
-            logger.info(f"✅ Отправлено: {t['title']}")
+            logger.info(f"[{section_key}] ✅ Отправлено: {t['title']}")
         else:
-            logger.info(f"🔒 Тема закрыта: {t['title']}")
+            logger.info(f"[{section_key}] 🔒 Тема закрыта: {t['title']}")
 
         new_topics_found = True
         await asyncio.sleep(0.5)
@@ -158,6 +173,6 @@ async def parse_section(section_key):
     if new_topics_found and all_ids:
         first_id = all_ids[0]
         update_last_seen(section_key, first_id)
-        logger.info(f"Обновлён last_seen для {section_key}: {first_id}")
+        logger.info(f"[{section_key}] Обновлён last_seen: {first_id}")
     else:
-        logger.info(f"Новых тем в {section_key} нет")
+        logger.info(f"[{section_key}] Новых тем нет")
