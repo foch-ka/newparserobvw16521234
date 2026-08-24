@@ -17,7 +17,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/addping – добавить пользователя (реплай, ID или @username)\n"
         "/removeping – удалить пользователя\n"
         "/listpings – список пользователей для упоминаний\n"
-        "/test – отправить тестовое сообщение"
+        "/test – отправить тестовое сообщение\n"
+        "/forceremind – принудительно отправить напоминание для всех тем (для отладки)"
     )
 
 async def setgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,15 +80,12 @@ async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user_id = None
     target_username = None
 
+    # Исправлено: проверяем наличие reply_to_message и args
     if update.message.reply_to_message:
         target_user_id = update.message.reply_to_message.from_user.id
         target_username = update.message.reply_to_message.from_user.username
-    else:
-        args = context.args
-        if not args:
-            await update.message.reply_html("Укажите пользователя (ID или @username) или ответьте на его сообщение.")
-            return
-        arg = args[0]
+    elif context.args:
+        arg = context.args[0]
         if arg.startswith('@'):
             try:
                 chat_member = await chat.get_member(arg)
@@ -107,6 +105,9 @@ async def addping(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except ValueError:
                 await update.message.reply_html("Некорректный ID.")
                 return
+    else:
+        await update.message.reply_html("Укажите пользователя (ID или @username) или ответьте на его сообщение.")
+        return
 
     if target_user_id is None:
         await update.message.reply_html("Не удалось определить пользователя.")
@@ -136,12 +137,8 @@ async def removeping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_user_id = None
     if update.message.reply_to_message:
         target_user_id = update.message.reply_to_message.from_user.id
-    else:
-        args = context.args
-        if not args:
-            await update.message.reply_html("Укажите пользователя (ID или @username) или ответьте на его сообщение.")
-            return
-        arg = args[0]
+    elif context.args:
+        arg = context.args[0]
         if arg.startswith('@'):
             try:
                 chat_member = await chat.get_member(arg)
@@ -155,6 +152,9 @@ async def removeping(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except ValueError:
                 await update.message.reply_html("Некорректный ID.")
                 return
+    else:
+        await update.message.reply_html("Укажите пользователя (ID или @username) или ответьте на его сообщение.")
+        return
 
     if target_user_id is None:
         await update.message.reply_html("Не удалось определить пользователя.")
@@ -188,6 +188,26 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_notification("🧪 <b>Тестовое сообщение</b> от бота. Если вы его видите – всё работает!")
     await update.message.reply_html("✅ Тестовое сообщение отправлено.")
 
+async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принудительно отправляет напоминания для всех тем, у которых reminder_sent=0 (для отладки)."""
+    logger.info(f"/forceremind от {update.effective_user.id}")
+    from database import get_topics_for_reminder, mark_reminder_sent
+    topics = get_topics_for_reminder()
+    if not topics:
+        await update.message.reply_html("Нет тем для напоминания.")
+        return
+    count = 0
+    for topic in topics:
+        topic_id, section_key, title, author, url = topic
+        msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
+              f"<b>Название:</b> {title}\n" \
+              f"<b>Автор:</b> {author}\n" \
+              f"<a href='{url}'>Ссылка</a>"
+        await send_notification(msg)
+        mark_reminder_sent(topic_id)
+        count += 1
+    await update.message.reply_html(f"✅ Отправлено напоминаний: {count}")
+
 def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setgroup", setgroup))
@@ -195,3 +215,4 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("removeping", removeping))
     app.add_handler(CommandHandler("listpings", listpings))
     app.add_handler(CommandHandler("test", test))
+    app.add_handler(CommandHandler("forceremind", forceremind))
