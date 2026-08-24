@@ -36,6 +36,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ---------- Последние просмотренные темы ----------
 def get_last_seen(section_key):
     conn = get_db_connection()
     c = conn.cursor()
@@ -52,6 +53,7 @@ def update_last_seen(section_key, topic_id):
     conn.commit()
     conn.close()
 
+# ---------- Темы для повторных уведомлений ----------
 def add_topic_for_reminder(topic_id, section_key, title, author, url, is_closed=False):
     conn = get_db_connection()
     c = conn.cursor()
@@ -107,6 +109,7 @@ def topic_exists(topic_id):
     conn.close()
     return row is not None
 
+# ---------- Управление пингами ----------
 def add_ping_user(chat_id, user_id, username=None, added_by=None):
     conn = get_db_connection()
     c = conn.cursor()
@@ -131,7 +134,9 @@ def get_ping_users(chat_id):
     conn.close()
     return rows
 
+# ---------- Для отладки (команда /showdb) ----------
 def get_all_topics():
+    """Возвращает все темы из таблицы pending_reminders (для команды /showdb)."""
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT topic_id, title, first_notified, reminder_sent, is_closed FROM pending_reminders")
