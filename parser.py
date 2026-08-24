@@ -16,47 +16,63 @@ async def parse_section(section_key):
         logger.warning(f"Нет URL для раздела {section_key}")
         return
 
+    logger.info(f"Начинаем парсинг раздела {section_key}, URL: {url}")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=HEADERS, timeout=15) as resp:
                 html = await resp.text()
+                logger.info(f"Получен HTML для {section_key}, длина: {len(html)} символов")
     except Exception as e:
         logger.error(f"Ошибка при запросе к {url}: {e}", exc_info=True)
         return
 
     soup = BeautifulSoup(html, "html.parser")
     last_topic_id = get_last_seen(section_key)
+    logger.info(f"Последний известный ID для {section_key}: {last_topic_id}")
+
+    # Поиск тем – пробуем разные селекторы
     topic_items = soup.select("li.ipsDataItem")
     if not topic_items:
         topic_items = soup.select("div.ipsDataItem")
     if not topic_items:
-        logger.warning(f"Не удалось найти темы в разделе {section_key}")
+        topic_items = soup.select("[class*='ipsDataItem']")
+    logger.info(f"Найдено элементов тем: {len(topic_items)}")
+
+    if not topic_items:
+        logger.warning(f"Не удалось найти темы в разделе {section_key}. Проверьте селекторы.")
         return
 
     new_topics_found = False
-    for item in topic_items:
+    for idx, item in enumerate(topic_items):
         title_tag = item.select_one("a.ipsDataItem_title")
         if not title_tag:
+            logger.debug(f"Элемент {idx} не содержит заголовка, пропускаем")
             continue
         topic_url = title_tag.get("href")
         if not topic_url.startswith("http"):
             topic_url = "https://forum.vimeworld.com" + topic_url
         topic_id = extract_topic_id_from_url(topic_url)
         if not topic_id:
+            logger.debug(f"Не удалось извлечь ID из URL: {topic_url}")
             continue
         if last_topic_id and topic_id == last_topic_id:
+            logger.info(f"Достигнут последний известный ID {last_topic_id}, прекращаем")
             break
         if topic_exists(topic_id):
+            logger.debug(f"Тема {topic_id} уже существует в БД, пропускаем")
             continue
 
         title = title_tag.text.strip()
         author_tag = item.select_one("a.ipsDataItem_author")
         author = author_tag.text.strip() if author_tag else "Неизвестен"
+
         lock_icon = item.select_one("span.ipsDataItem_icon .fa-lock")
         is_closed = lock_icon is not None
         if not is_closed:
             if "ipsDataItem_closed" in item.get("class", []):
                 is_closed = True
+
+        logger.info(f"Новая тема: '{title}', автор {author}, ID {topic_id}, закрыта: {is_closed}")
 
         add_topic_for_reminder(topic_id, section_key, title, author, topic_url, is_closed)
         if not is_closed:
@@ -66,9 +82,9 @@ async def parse_section(section_key):
                       f"**Автор:** {author}\n" \
                       f"**Ссылка:** {topic_url}"
             await send_notification(message)
-            logger.info(f"[{section_key}] Новая открытая тема: {title}")
+            logger.info(f"[{section_key}] Отправлено уведомление о новой теме: {title}")
         else:
-            logger.info(f"[{section_key}] Новая тема, но закрыта: {title}")
+            logger.info(f"[{section_key}] Тема закрыта, уведомление не отправлено: {title}")
         new_topics_found = True
 
     if new_topics_found and topic_items:
@@ -77,4 +93,6 @@ async def parse_section(section_key):
             first_id = extract_topic_id_from_url(first_topic_url)
             if first_id:
                 update_last_seen(section_key, first_id)
-                logger.debug(f"Обновлён last_seen для {section_key}: {first_id}")
+                logger.info(f"Обновлён last_seen для {section_key}: {first_id}")
+    else:
+        logger.info(f"Новых тем в разделе {section_key} не найдено.")
