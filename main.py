@@ -1,5 +1,4 @@
 import asyncio
-import threading
 import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
@@ -12,6 +11,7 @@ from bot_handlers import register_handlers
 
 init_db()
 
+# Загрузка ID группы из файла, если он есть
 if os.path.exists("group_id.txt"):
     with open("group_id.txt", "r") as f:
         saved_id = f.read().strip()
@@ -22,21 +22,21 @@ if os.path.exists("group_id.txt"):
 
 async def run_parsers():
     print("Запуск парсеров...")
-    parse_section("complaint_staff")
-    parse_section("complaint_player")
-    parse_section("question_answer")
+    await parse_section("complaint_staff")
+    await parse_section("complaint_player")
+    await parse_section("question_answer")
 
 async def check_reminders():
     print("Проверка напоминаний...")
     topics = get_topics_for_reminder()
     for topic in topics:
         topic_id, section_key, title, author, url = topic
-        if is_topic_closed_on_page(url):
+        if await is_topic_closed_on_page(url):
             update_topic_closed_status(topic_id, is_closed=True)
             print(f"Тема '{title}' закрыта, повторное уведомление не отправляем.")
         else:
             message = f"⏰ **Напоминание!**\n\nТема **'{title}'** от **{author}** всё ещё открыта.\nСсылка: {url}"
-            send_notification(message)
+            await send_notification(message)
             mark_reminder_sent(topic_id)
             print(f"Отправлено повторное уведомление для темы '{title}'.")
 
@@ -45,17 +45,26 @@ async def scheduled_jobs():
     scheduler.add_job(run_parsers, 'interval', minutes=CHECK_INTERVAL)
     scheduler.add_job(check_reminders, 'interval', minutes=REMINDER_INTERVAL)
     scheduler.start()
-    await run_parsers()
+    await run_parsers()  # запуск сразу при старте
+    # Бесконечное ожидание, чтобы планировщик работал
     while True:
         await asyncio.sleep(60)
 
-def run_bot():
+async def run_bot():
     app = Application.builder().token(TOKEN).build()
     register_handlers(app)
-    print("Бот запущен...")
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    # Держим бота активным
+    try:
+        while True:
+            await asyncio.sleep(1)
+    finally:
+        await app.stop()
+
+async def main():
+    await asyncio.gather(run_bot(), scheduled_jobs())
 
 if __name__ == "__main__":
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    asyncio.run(scheduled_jobs())
+    asyncio.run(main())
