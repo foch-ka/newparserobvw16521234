@@ -4,7 +4,7 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
 
-from config import TOKEN, CHECK_INTERVAL, REMINDER_INTERVAL, GROUP_CHAT_ID, TOPIC_ID, GROUP_ID_FILE, TOPIC_ID_FILE, DATA_DIR
+from config import TOKEN, CHECK_INTERVAL, REMINDER_INTERVAL, GROUP_CHAT_ID, TOPIC_ID, GROUP_ID_FILE, TOPIC_ID_FILE, DATA_DIR, FORUM_URLS
 from database import init_db, get_topics_for_reminder, mark_reminder_sent, update_topic_closed_status
 from parser import parse_section
 from utils import send_notification, is_topic_closed_on_page
@@ -19,7 +19,7 @@ logger.info(f"Папка данных: {DATA_DIR}")
 init_db()
 logger.info("База данных инициализирована")
 
-# Загрузка ID группы и темы из файлов (если они есть)
+# Загрузка ID группы и темы из файлов
 if os.path.exists(GROUP_ID_FILE):
     with open(GROUP_ID_FILE, "r") as f:
         saved_group = f.read().strip()
@@ -39,18 +39,15 @@ if os.path.exists(TOPIC_ID_FILE):
             config.TOPIC_ID = None
             logger.info("Установлен общий чат (без темы)")
 
-# Логируем текущие настройки
 logger.info(f"Загружены интервалы: CHECK_INTERVAL={CHECK_INTERVAL} мин, REMINDER_INTERVAL={REMINDER_INTERVAL} мин")
 logger.info(f"Текущий GROUP_CHAT_ID={GROUP_CHAT_ID}, TOPIC_ID={TOPIC_ID}")
+logger.info(f"Разделы для парсинга: {list(FORUM_URLS.keys())}")
 
 async def run_parsers():
     logger.info("Запуск парсеров...")
-    try:
-        await parse_section("complaint_staff")
-        await parse_section("complaint_player")
-        await parse_section("question_answer")
-    except Exception as e:
-        logger.error(f"Ошибка при парсинге: {e}", exc_info=True)
+    for key in ["complaint_staff", "complaint_player", "question_answer"]:
+        logger.info(f"Парсинг раздела: {key} -> {FORUM_URLS[key]}")
+        await parse_section(key)
 
 async def check_reminders():
     logger.info("Проверка напоминаний...")
@@ -64,7 +61,6 @@ async def check_reminders():
                 update_topic_closed_status(topic_id, is_closed=True)
                 logger.info(f"Тема '{title}' закрыта, повторное уведомление не отправляем.")
             else:
-                # Текст повторного уведомления изменён на "Есть не закрытая тема"
                 message = f"⏰ **Есть не закрытая тема!**\n\n" \
                           f"**Название:** {title}\n" \
                           f"**Автор:** {author}\n" \
@@ -81,7 +77,7 @@ async def scheduled_jobs():
     scheduler.add_job(check_reminders, 'interval', minutes=REMINDER_INTERVAL)
     scheduler.start()
     logger.info(f"Планировщик запущен: парсинг каждые {CHECK_INTERVAL} мин, напоминания каждые {REMINDER_INTERVAL} мин.")
-    await run_parsers()  # первый запуск сразу
+    await run_parsers()
     while True:
         await asyncio.sleep(60)
 
