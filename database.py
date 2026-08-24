@@ -36,7 +36,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# ---------- Последние просмотренные темы ----------
 def get_last_seen(section_key):
     conn = get_db_connection()
     c = conn.cursor()
@@ -53,7 +52,6 @@ def update_last_seen(section_key, topic_id):
     conn.commit()
     conn.close()
 
-# ---------- Темы для повторных уведомлений ----------
 def add_topic_for_reminder(topic_id, section_key, title, author, url, is_closed=False):
     conn = get_db_connection()
     c = conn.cursor()
@@ -79,13 +77,24 @@ def mark_reminder_sent(topic_id):
     conn.close()
 
 def get_topics_for_reminder():
-    """Возвращает темы, у которых прошло >=24 часа, reminder_sent=0 и is_closed=0."""
+    """Используется в планировщике – только те, где прошло 24 часа."""
     conn = get_db_connection()
     c = conn.cursor()
     threshold = datetime.now() - timedelta(hours=24)
     c.execute('''SELECT topic_id, section_key, title, author, url 
                  FROM pending_reminders 
                  WHERE first_notified <= ? AND reminder_sent = 0 AND is_closed = 0''', (threshold,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+def get_all_pending_topics():
+    """Используется в /forceremind – все темы, где reminder_sent=0 и is_closed=0, без учёта времени."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute('''SELECT topic_id, section_key, title, author, url 
+                 FROM pending_reminders 
+                 WHERE reminder_sent = 0 AND is_closed = 0''')
     rows = c.fetchall()
     conn.close()
     return rows
@@ -98,7 +107,6 @@ def topic_exists(topic_id):
     conn.close()
     return row is not None
 
-# ---------- Управление пингами ----------
 def add_ping_user(chat_id, user_id, username=None, added_by=None):
     conn = get_db_connection()
     c = conn.cursor()
@@ -123,9 +131,7 @@ def get_ping_users(chat_id):
     conn.close()
     return rows
 
-# ---------- Для отладки ----------
 def get_all_topics():
-    """Возвращает все темы из таблицы pending_reminders (для команды /showdb)."""
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT topic_id, title, first_notified, reminder_sent, is_closed FROM pending_reminders")
