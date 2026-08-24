@@ -3,14 +3,27 @@ import asyncio
 from telegram import Bot
 from bs4 import BeautifulSoup
 from config import TOKEN, HEADERS, GROUP_CHAT_ID
+from database import get_ping_users
 
 bot = Bot(token=TOKEN)
 
 def send_notification(text):
-    """Отправляет сообщение только в группу (если GROUP_CHAT_ID задан)."""
     if GROUP_CHAT_ID is None:
         print("GROUP_CHAT_ID не задан, сообщение не отправлено.")
         return
+
+    # Получаем пользователей для пинга
+    ping_users = get_ping_users(GROUP_CHAT_ID)
+    mentions = []
+    for user in ping_users:
+        user_id = user['user_id']
+        username = user.get('username', str(user_id))
+        # Создаём упоминание через tg://user?id=
+        mentions.append(f"[@{username}](tg://user?id={user_id})")
+
+    if mentions:
+        text += "\n\n🔔 Упоминания: " + " ".join(mentions)
+
     try:
         asyncio.run(bot.send_message(chat_id=GROUP_CHAT_ID, text=text, parse_mode="Markdown"))
     except Exception as e:
