@@ -12,7 +12,6 @@ from bot_handlers import register_handlers
 
 init_db()
 
-# Если есть файл с сохранённым ID группы, загружаем его
 if os.path.exists("group_id.txt"):
     with open("group_id.txt", "r") as f:
         saved_id = f.read().strip()
