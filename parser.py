@@ -23,11 +23,9 @@ async def fetch_html(url):
         return None
 
 def extract_numeric_id(url):
-    """Извлекает числовой ID темы из URL вида /topic/123456-..."""
     match = re.search(r'/topic/(\d+)-', url)
     if match:
         return match.group(1)
-    # Если ссылка не соответствует, пробуем найти число в конце
     match = re.search(r'/(\d+)(?:-|$)', url)
     if match:
         return match.group(1)
@@ -37,23 +35,29 @@ def parse_topics(html, section_key):
     soup = BeautifulSoup(html, 'html.parser')
     topics = []
 
-    # Ищем элементы с классом, содержащим 'ipsDataItem'
-    items = soup.find_all(class_=lambda c: c and 'ipsDataItem' in c)
+    items = soup.find_all('li', class_=lambda c: c and 'ipsDataItem' in c)
+    if not items:
+        items = soup.find_all(class_=lambda c: c and 'ipsDataItem' in c)
     if not items:
         items = soup.find_all('li', class_=lambda c: c and 'dataItem' in c)
+    if not items:
+        items = soup.find_all('div', class_=lambda c: c and ('topic' in c.lower() or 'thread' in c.lower()))
+    if not items:
+        items = soup.find_all(class_=lambda c: c and 'topic' in c.lower())
 
-    logger.info(f"Найдено элементов: {len(items)}")
+    logger.info(f"Найдено элементов для разбора: {len(items)}")
 
     for item in items:
-        if 'ipsDataItem_pinned' in item.get('class', []):
+        if isinstance(item.get('class'), list) and 'ipsDataItem_pinned' in item.get('class', []):
             continue
 
-        # Заголовок и ссылка
         title_tag = item.find('h4', class_='ipsDataItem_title')
         if not title_tag:
             title_tag = item.find('a', class_='ipsDataItem_title')
         if not title_tag:
-            title_tag = item.find('a')
+            title_tag = item.find('h4')
+            if not title_tag:
+                title_tag = item.find('a')
         if not title_tag:
             continue
 
@@ -66,29 +70,24 @@ def parse_topics(html, section_key):
         if link and not link.startswith('http'):
             link = "https://forum.vimeworld.com" + link
 
-        # Извлекаем числовой ID – теперь строго
         topic_id = extract_numeric_id(link)
         if not topic_id:
             logger.warning(f"Не удалось извлечь ID из ссылки: {link}")
             continue
 
-        # Автор – ищем в нескольких местах
         author = "Неизвестный"
         meta = item.find('div', class_='ipsDataItem_meta')
         if meta:
-            # Ищем ссылку на автора
             author_tag = meta.find('a', class_=lambda c: c and ('author' in c or 'user' in c))
             if not author_tag:
                 author_tag = meta.find('a')
             if author_tag:
                 author = author_tag.get_text(strip=True)
             else:
-                # Иногда автор в span
                 author_span = meta.find('span', class_='ipsType_light')
                 if author_span:
                     author = author_span.get_text(strip=True)
 
-        # Время
         time_tag = meta.find('time') if meta else None
         if time_tag:
             event_time = time_tag.get_text(strip=True)
@@ -133,24 +132,23 @@ async def parse_section(section_key):
         topic_id = t['id']
         all_ids.append(topic_id)
 
-        # Проверяем, есть ли уже в БД
         if topic_exists(topic_id):
             logger.debug(f"Тема {topic_id} уже есть, пропускаем")
             continue
 
-        # Новая тема
         logger.info(f"🆕 НОВАЯ ТЕМА: {t['title']} (ID: {topic_id})")
         is_closed = await is_topic_closed_on_page(t['link'])
         add_topic_for_reminder(topic_id, section_key, t['title'], t['author'], t['link'], is_closed)
 
         if not is_closed:
             section_name = SECTION_NAMES.get(section_key, section_key)
+            # HTML-разметка
             msg = (
-                f"🆕 **Новая тема** в разделе *{section_name}*\n\n"
-                f"📌 **Тема:** {t['title']}\n"
-                f"👤 **Автор:** {t['author']}\n"
-                f"🕒 **Время:** {t['time']}\n"
-                f"🔗 [Ссылка]({t['link']})"
+                f"🆕 <b>Новая тема</b> в разделе <i>{section_name}</i>\n\n"
+                f"📌 <b>Тема:</b> {t['title']}\n"
+                f"👤 <b>Автор:</b> {t['author']}\n"
+                f"🕒 <b>Время:</b> {t['time']}\n"
+                f"🔗 <a href='{t['link']}'>Ссылка</a>"
             )
             await send_notification(msg)
             logger.info(f"✅ Отправлено: {t['title']}")
@@ -161,7 +159,7 @@ async def parse_section(section_key):
         await asyncio.sleep(0.5)
 
     if new_topics_found and all_ids:
-        first_id = all_ids[0]  # самая новая тема
+        first_id = all_ids[0]
         update_last_seen(section_key, first_id)
         logger.info(f"Обновлён last_seen для {section_key}: {first_id}")
     else:
