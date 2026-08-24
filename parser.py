@@ -1,25 +1,26 @@
-import requests
+import aiohttp
 from bs4 import BeautifulSoup
 from config import FORUM_URLS, SECTION_NAMES, HEADERS
 from database import (
-    get_last_seen, update_last_seen, 
+    get_last_seen, update_last_seen,
     add_topic_for_reminder, topic_exists
 )
 from utils import send_notification, is_topic_closed_on_page, extract_topic_id_from_url
 
-def parse_section(section_key):
+async def parse_section(section_key):
     url = FORUM_URLS.get(section_key)
     if not url:
         return
 
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=HEADERS, timeout=15) as resp:
+                html = await resp.text()
     except Exception as e:
         print(f"Ошибка при запросе к {url}: {e}")
         return
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup = BeautifulSoup(html, "html.parser")
     last_topic_id = get_last_seen(section_key)
     topic_items = soup.select("li.ipsDataItem")
     if not topic_items:
@@ -43,6 +44,7 @@ def parse_section(section_key):
             break
         if topic_exists(topic_id):
             continue
+
         title = title_tag.text.strip()
         author_tag = item.select_one("a.ipsDataItem_author")
         author = author_tag.text.strip() if author_tag else "Неизвестен"
@@ -59,7 +61,7 @@ def parse_section(section_key):
                       f"**Название:** {title}\n" \
                       f"**Автор:** {author}\n" \
                       f"**Ссылка:** {topic_url}"
-            send_notification(message)
+            await send_notification(message)
             print(f"[{section_key}] Новая открытая тема: {title}")
         else:
             print(f"[{section_key}] Новая тема, но закрыта: {title}")
