@@ -1,11 +1,12 @@
 import asyncio
 import os
 import logging
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
 
 from config import TOKEN, CHECK_INTERVAL, REMINDER_INTERVAL, GROUP_CHAT_ID, TOPIC_ID, GROUP_ID_FILE, TOPIC_ID_FILE, DATA_DIR, FORUM_URLS
-from database import init_db, get_topics_for_reminder, mark_reminder_sent, update_topic_closed_status
+from database import init_db, get_topics_for_reminder, mark_reminder_sent, update_topic_closed_status, get_db_connection
 from parser import parse_section
 from utils import send_notification, is_topic_closed_on_page
 from bot_handlers import register_handlers
@@ -45,16 +46,28 @@ async def run_parsers():
         await parse_section(key)
 
 async def check_reminders():
-    logger.info("Проверка напоминаний...")
+    logger.info("=== Проверка напоминаний ===")
     try:
+        # Логируем все темы из таблицы для отладки
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute("SELECT topic_id, title, first_notified, reminder_sent, is_closed FROM pending_reminders")
+        all_rows = c.fetchall()
+        conn.close()
+        logger.info(f"Всего тем в БД: {len(all_rows)}")
+        for row in all_rows:
+            logger.info(f"Тема: {row['title']}, first_notified: {row['first_notified']}, "
+                        f"reminder_sent: {row['reminder_sent']}, is_closed: {row['is_closed']}")
+
         topics = get_topics_for_reminder()
-        logger.info(f"Тем для напоминания: {len(topics)}")
+        logger.info(f"Тем для напоминания (по условиям): {len(topics)}")
         for topic in topics:
             topic_id, section_key, title, author, url = topic
-            logger.info(f"Проверка: {title}")
-            if await is_topic_closed_on_page(url):
+            logger.info(f"Проверка: {title} (ID: {topic_id})")
+            is_closed = await is_topic_closed_on_page(url)
+            if is_closed:
                 update_topic_closed_status(topic_id, is_closed=True)
-                logger.info(f"Тема '{title}' закрыта")
+                logger.info(f"Тема '{title}' закрыта, обновлено is_closed=1")
             else:
                 msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
                       f"<b>Название:</b> {title}\n" \
@@ -62,7 +75,7 @@ async def check_reminders():
                       f"<a href='{url}'>Ссылка</a>"
                 await send_notification(msg)
                 mark_reminder_sent(topic_id)
-                logger.info(f"Повторное уведомление для '{title}'")
+                logger.info(f"Повторное уведомление для '{title}' отправлено")
     except Exception as e:
         logger.error(f"Ошибка в check_reminders: {e}", exc_info=True)
 
