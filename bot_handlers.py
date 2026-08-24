@@ -4,16 +4,16 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from config import GROUP_CHAT_ID, GROUP_ID_FILE, TOPIC_ID_FILE
 from database import (
     add_ping_user, remove_ping_user, get_ping_users,
-    get_all_topics, get_all_pending_topics, mark_reminder_sent,
-    update_topic_closed_status
+    get_all_topics, get_all_open_topics, mark_reminder_sent,
+    update_topic_closed_status, reset_reminder
 )
 from utils import send_notification, is_topic_closed_on_page
 
 logger = logging.getLogger(__name__)
 
-PAGE_SIZE = 5  # количество тем на одной странице
+PAGE_SIZE = 5
 
-# ---------- Вспомогательная функция для отправки страницы /showdb ----------
+# ---------- Пагинация /showdb ----------
 async def send_showdb_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
     rows = context.user_data.get('showdb_rows')
     if not rows:
@@ -55,7 +55,6 @@ async def send_showdb_page(update: Update, context: ContextTypes.DEFAULT_TYPE, p
     else:
         await update.message.reply_html(text, reply_markup=reply_markup)
 
-# ---------- Обработчик команды /showdb ----------
 async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/showdb от {update.effective_user.id}")
     try:
@@ -63,14 +62,12 @@ async def showdb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not rows:
             await update.message.reply_html("📭 База данных пуста.")
             return
-        # Сохраняем данные в user_data
         context.user_data['showdb_rows'] = rows
         await send_showdb_page(update, context, 0)
     except Exception as e:
         logger.error(f"Ошибка в /showdb: {e}", exc_info=True)
         await update.message.reply_html(f"❌ Ошибка: {e}")
 
-# ---------- Обработчик нажатий на кнопки пагинации ----------
 async def showdb_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
@@ -82,7 +79,7 @@ async def showdb_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         page = int(data.split("_")[2])
         await send_showdb_page(update, context, page)
 
-# ---------- Остальные команды (без изменений) ----------
+# ---------- Основные команды ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/start от {update.effective_user.id}")
     await update.message.reply_html(
@@ -266,9 +263,10 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/forceremind от {update.effective_user.id}")
     try:
-        topics = get_all_pending_topics()
+        # Получаем ВСЕ открытые темы (is_closed=0) независимо от reminder_sent
+        topics = get_all_open_topics()
         if not topics:
-            await update.message.reply_html("📭 Нет открытых тем для напоминания (по данным БД).")
+            await update.message.reply_html("📭 Нет открытых тем для напоминания.")
             return
         sent_count = 0
         for topic in topics:
@@ -279,14 +277,16 @@ async def forceremind(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update_topic_closed_status(topic_id, is_closed=True)
                 logger.info(f"Тема '{title}' закрыта, пропускаем, обновлён is_closed=1")
                 continue
+            # Отправляем напоминание
             msg = f"⏰ <b>Есть не закрытая тема!</b>\n\n" \
                   f"<b>Название:</b> {title}\n" \
                   f"<b>Автор:</b> {author}\n" \
                   f"<a href='{url}'>Ссылка</a>"
             await send_notification(msg)
-            mark_reminder_sent(topic_id)
+            # Сбрасываем reminder_sent и обновляем first_notified на текущее время
+            reset_reminder(topic_id)
             sent_count += 1
-            logger.info(f"Отправлено напоминание для '{title}'")
+            logger.info(f"Отправлено напоминание для '{title}', флаг сброшен")
         await update.message.reply_html(f"✅ Отправлено напоминаний: {sent_count}")
     except Exception as e:
         logger.error(f"Ошибка в /forceremind: {e}", exc_info=True)
@@ -301,5 +301,4 @@ def register_handlers(app: Application):
     app.add_handler(CommandHandler("test", test))
     app.add_handler(CommandHandler("forceremind", forceremind))
     app.add_handler(CommandHandler("showdb", showdb))
-    # Обработчик кнопок пагинации
     app.add_handler(CallbackQueryHandler(showdb_callback, pattern="^showdb_"))
