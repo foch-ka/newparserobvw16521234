@@ -3,13 +3,14 @@ import aiohttp
 import asyncio
 import re
 import hashlib
+from datetime import datetime
 from bs4 import BeautifulSoup
 from config import FORUM_URLS, SECTION_NAMES, HEADERS
 from database import (
     get_last_seen, update_last_seen,
     add_topic_for_reminder, topic_exists
 )
-from utils import send_notification, is_topic_closed_on_page
+from utils import send_notification, is_topic_closed_on_page, format_moscow_time
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +25,17 @@ async def fetch_html(url):
         return None
 
 def extract_numeric_id(url):
-    """Извлекает числовой ID темы из ссылки."""
     if not url:
         return None
-    # /topic/123456-...
     match = re.search(r'/topic/(\d+)-', url)
     if match:
         return match.group(1)
-    # /123456-... (редко)
     match = re.search(r'/(\d+)(?:-|$)', url)
     if match:
         return match.group(1)
     return None
 
 def generate_fallback_id(url):
-    """Генерирует уникальный ID на основе ссылки (если числовой не извлёкся)."""
     hash_obj = hashlib.md5(url.encode())
     return f"fallback_{hash_obj.hexdigest()[:12]}"
 
@@ -46,7 +43,6 @@ def parse_topics(html, section_key):
     soup = BeautifulSoup(html, 'html.parser')
     topics = []
 
-    # Поиск элементов тем – несколько вариантов
     items = soup.find_all('li', class_=lambda c: c and 'ipsDataItem' in c)
     if not items:
         items = soup.find_all(class_=lambda c: c and 'ipsDataItem' in c)
@@ -80,13 +76,11 @@ def parse_topics(html, section_key):
         if link and not link.startswith('http'):
             link = "https://forum.vimeworld.com" + link
 
-        # Извлекаем ID (числовой или fallback)
         numeric_id = extract_numeric_id(link)
         topic_id = numeric_id if numeric_id else generate_fallback_id(link)
         if not numeric_id:
             logger.warning(f"[{section_key}] Не удалось извлечь числовой ID из {link}, fallback: {topic_id}")
 
-        # Автор
         author = "Неизвестный"
         meta = item.find('div', class_='ipsDataItem_meta')
         if meta:
@@ -100,7 +94,6 @@ def parse_topics(html, section_key):
                 if author_span:
                     author = author_span.get_text(strip=True)
 
-        # Время
         time_tag = meta.find('time') if meta else None
         if time_tag:
             event_time = time_tag.get_text(strip=True)
@@ -155,14 +148,15 @@ async def parse_section(section_key):
 
         if not is_closed:
             section_name = SECTION_NAMES.get(section_key, section_key)
+            current_time = format_moscow_time()
             msg = (
                 f"🆕 <b>Новая тема</b> в разделе <i>{section_name}</i>\n\n"
                 f"📌 <b>Тема:</b> {t['title']}\n"
                 f"👤 <b>Автор:</b> {t['author']}\n"
-                f"🕒 <b>Время:</b> {t['time']}\n"
+                f"🕒 <b>Время:</b> {current_time}\n"
                 f"🔗 <a href='{t['link']}'>Ссылка</a>"
             )
-            await send_notification(msg)
+            await send_notification(msg, topic_id)
             logger.info(f"[{section_key}] ✅ Отправлено: {t['title']}")
         else:
             logger.info(f"[{section_key}] 🔒 Тема закрыта: {t['title']}")
