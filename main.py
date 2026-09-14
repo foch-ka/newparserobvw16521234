@@ -6,9 +6,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
 
 from config import TOKEN, CHECK_INTERVAL, REMINDER_INTERVAL, GROUP_CHAT_ID, TOPIC_ID, GROUP_ID_FILE, TOPIC_ID_FILE, DATA_DIR, FORUM_URLS, SECTION_NAMES
-from database import init_db, get_topics_for_reminder, mark_reminder_sent, update_topic_closed_status, get_db_connection
+from database import init_db, get_topics_for_reminder, mark_reminder_sent, update_topic_closed_status, get_db_connection, get_topic_closure
 from parser import parse_section
-from utils import send_notification, is_topic_closed_on_page
+from utils import send_notification, is_topic_closed_on_page, send_personal_reminder, format_moscow_time
 from bot_handlers import register_handlers
 from logger import setup_logger
 
@@ -61,20 +61,41 @@ async def check_reminders():
         topics = get_topics_for_reminder()
         logger.info(f"Тем для напоминания (по условиям): {len(topics)}")
         for topic in topics:
-            topic_id, section_key, title, author, url = topic
+            topic_id = topic['topic_id']
+            section_key = topic['section_key']
+            title = topic['title']
+            author = topic['author']
+            url = topic['url']
+            first_notified = topic['first_notified']
+
             logger.info(f"Проверка: {title} (ID: {topic_id})")
             is_closed = await is_topic_closed_on_page(url)
             if is_closed:
                 update_topic_closed_status(topic_id, is_closed=True)
                 logger.info(f"Тема '{title}' закрыта, обновлено is_closed=1")
             else:
-                # Получаем название раздела
+                closure = get_topic_closure(topic_id)
+                assigned_user_id = closure['assigned_user_id'] if closure else None
+                assigned_username = closure['closed_by'] if closure else None
+
                 section_name = SECTION_NAMES.get(section_key, section_key)
-                msg = f"⏰ <b>Есть не закрытая тема</b> в разделе <i>{section_name}</i>!\n\n" \
-                      f"<b>Название:</b> {title}\n" \
-                      f"<b>Автор:</b> {author}\n" \
-                      f"<a href='{url}'>Ссылка</a>"
-                await send_notification(msg)
+                time_str = format_moscow_time(first_notified)
+
+                if assigned_user_id:
+                    text = f"⏰ <b>Вы обещали закрыть тему, но она всё ещё открыта!</b>\n\n" \
+                           f"📌 <b>Тема:</b> {title}\n" \
+                           f"👤 <b>Автор:</b> {author}\n" \
+                           f"🕒 <b>Время:</b> {time_str}\n" \
+                           f"🔗 <a href='{url}'>Ссылка</a>"
+                    await send_personal_reminder(text, assigned_user_id, assigned_username)
+                else:
+                    text = f"⏰ <b>Есть не закрытая тема</b> в разделе <i>{section_name}</i>!\n\n" \
+                           f"<b>Название:</b> {title}\n" \
+                           f"<b>Автор:</b> {author}\n" \
+                           f"🕒 <b>Время:</b> {time_str}\n" \
+                           f"<a href='{url}'>Ссылка</a>"
+                    await send_notification(text)
+
                 mark_reminder_sent(topic_id)
                 logger.info(f"Повторное уведомление для '{title}' отправлено")
     except Exception as e:
