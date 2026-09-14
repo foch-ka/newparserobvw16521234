@@ -24,7 +24,6 @@ if TOPIC_ID:
 else:
     TOPIC_ID = None
 
-# Список разрешённых пользователей для ЛС (через запятую)
 ALLOWED_USERS = os.getenv("ALLOWED_USERS", "")
 if ALLOWED_USERS:
     ALLOWED_USERS = [int(x.strip()) for x in ALLOWED_USERS.split(",") if x.strip().isdigit()]
